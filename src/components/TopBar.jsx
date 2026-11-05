@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, Copy, Download, Move3D, Redo2, Rotate3D, Save, Trash2, Undo2, Upload } from 'lucide-react';
+import { CheckCircle2, Copy, Download, Move3D, Redo2, Rotate3D, Save, Trash2, Undo2, Upload, Waypoints } from 'lucide-react';
 import useSceneStore from '../store/useSceneStore';
 import { downloadXML, saveXMLToHandle, timestampedXMLFilename } from '../utils/xmlExporter';
 import { translate } from '../i18n';
@@ -38,6 +38,8 @@ function TopBar() {
   const setLanguage = useSceneStore((state) => state.setLanguage);
   const theme = useSceneStore((state) => state.theme);
   const toggleTheme = useSceneStore((state) => state.toggleTheme);
+  const roughnessWireframe = useSceneStore((state) => state.roughnessWireframe);
+  const toggleRoughnessWireframe = useSceneStore((state) => state.toggleRoughnessWireframe);
   const sourceFileName = useSceneStore((state) => state.sourceFileName);
   const sourceFileHandle = useSceneStore((state) => state.sourceFileHandle);
   const hasUnsavedChanges = useSceneStore((state) => state.hasUnsavedChanges);
@@ -158,6 +160,17 @@ function TopBar() {
             aria-label={theme === 'light' ? t('darkMode') : t('lightMode')}
           >
             <ThemeGlyph />
+          </button>
+          <button
+            type="button"
+            className={`ui-button ui-button--secondary${roughnessWireframe ? ' is-active' : ''}`}
+            onClick={toggleRoughnessWireframe}
+            title={t(roughnessWireframe ? 'hideRoughnessWireframe' : 'showRoughnessWireframe')}
+            aria-label={t('roughnessWireframe')}
+            aria-pressed={roughnessWireframe}
+          >
+            <Waypoints size={16} strokeWidth={1.75} />
+            <span className="app-label-text">{t('roughnessWireframe')}</span>
           </button>
           <button
             type="button"

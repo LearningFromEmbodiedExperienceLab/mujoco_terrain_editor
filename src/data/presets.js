@@ -70,18 +70,23 @@ export const PRESETS = [
       { key: 'stepLength', label: { zh: '踏步长度 / X', en: 'Step Length / X' }, unit: 'M', default: 0.3, min: 0.01, step: 0.05 },
       { key: 'stepHeight', label: { zh: '踏步高度', en: 'Step Height' }, unit: 'M', default: 0.15, min: 0.01, step: 0.05 },
       { key: 'steps', label: { zh: '台阶级数', en: 'Step Count' }, unit: '', default: 8, min: 1, step: 1, integer: true },
+      { key: 'floating', label: { zh: '悬浮楼梯', en: 'Floating Stairs' }, type: 'boolean', default: false },
+      { key: 'floatingThickness', label: { zh: '悬浮踏步厚度', en: 'Floating Stair Thickness' }, unit: 'M', default: 0.05, min: 0.01, step: 0.01, visibleWhen: ({ floating }) => floating },
     ],
     getSummary: ({ stepLength, stepHeight }, language = 'zh') => `${language === 'zh' ? '阶梯 ' : 'Step '}${stepLength.toFixed(2)} × ${stepHeight.toFixed(2)} m`,
-    getGroundOffset: ({ stepHeight, steps }) => stepHeight * Math.max(1, Math.round(steps)) / 2,
-    toGeometries: ({ stepWidth, stepLength, stepHeight, steps: rawSteps }) => {
+    getGroundOffset: ({ stepHeight, steps, floating, floatingThickness }) => (
+      stepHeight * Math.max(1, Math.round(steps)) / 2 - (floating ? stepHeight - floatingThickness : 0)
+    ),
+    toGeometries: ({ stepWidth, stepLength, stepHeight, steps: rawSteps, floating, floatingThickness }) => {
       const steps = Math.max(1, Math.round(rawSteps));
       const totalLength = stepLength * steps;
       const totalHeight = stepHeight * steps;
       return Array.from({ length: steps }, (_, i) => {
         const currentHeight = stepHeight * (i + 1);
+        const thickness = floating ? floatingThickness : currentHeight;
         return {
-          args: [stepLength * 0.97, stepWidth, currentHeight],
-          position: [-totalLength / 2 + stepLength * (i + 0.5), 0, currentHeight / 2 - totalHeight / 2],
+          args: [stepLength * 0.97, stepWidth, thickness],
+          position: [-totalLength / 2 + stepLength * (i + 0.5), 0, currentHeight - thickness / 2 - totalHeight / 2],
         };
       });
     },

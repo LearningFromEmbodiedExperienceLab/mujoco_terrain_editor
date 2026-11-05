@@ -17,6 +17,7 @@ The editor runs entirely in the browser and provides interactive transforms, pre
 - Export the scene as standalone MJCF XML and import it later for continued editing.
 - Save changes directly back to an opened XML file in browsers that support the File System Access API.
 - Switch between English and Chinese interfaces and light or dark themes.
+- The viewport uses soft lighting in both light and dark themes.
 
 ## Getting Started
 
@@ -85,14 +86,30 @@ The editor protects unsaved changes before loading another file. Direct file sav
 - **Box:** width, depth, and height.
 - **Cylinder:** radius and height.
 - **Ramp:** surface width, horizontal length, and slope angle.
-- **Stairs:** step width, step length, step height, and step count. Stairs rise along the positive X axis by default.
+- **Stairs:** step width, step length, step height, and step count. Stairs rise along the positive X axis by default. Enable **Floating Stairs** for separate treads with configurable thickness (default: `0.05 m`). The thickness field appears only when enabled. Ground Lock keeps the lowest tread's bottom at `Z = 0`.
 - **Platform:** width, depth, and height.
 
 Default dimensions and terrain definitions are centralized in [`src/data/presets.js`](src/data/presets.js). Change a parameter's `default` value to update its initial dimensions. To introduce a new terrain type, add a `defineTerrainPreset` configuration; the component library, properties panel, ground-lock behavior, and XML exporter will use it automatically.
 
 Editor-wide snapping increments and gizmo sizes are defined in [`src/editorConfig.js`](src/editorConfig.js).
 
+### Perlin Surface Roughness
+
+Every terrain type has an **Apply Perlin Noise** checkbox. Enabling it reveals:
+
+- **Noise Amplitude:** signed roughness range in meters, from minus to plus this value (default: `±0.02`).
+- **Noise Height Step:** height-field quantization increment in meters (default: `0.01`). Heights are rounded to this step before interpolation; range limits are rounded to the nearest step as well.
+- **Noise Frequency:** spatial frequency in inverse meters (default: `2`); higher values create smaller features.
+- **Noise Seed:** integer seed for reproducible surfaces (default: `1`).
+- **Surface Resolution:** subdivisions along the terrain's longest edge (default: `16`, range: `4–32`); increase it to capture finer noise.
+
+Roughness follows LocoLab's shared sampler: two gradient-Perlin octaves with weights `1` and `0.25`, mean centering, signed range scaling, height quantization, and bilinear sampling. The seed also varies the coarse wavelength within one octave. Frequency is limited by grid spacing to avoid undersampling.
+
+Noisy upper surfaces use matte shading, crisp borders, and a subtle height-based tint to keep shallow relief readable without changing the geometry or exported colors. Use the toolbar's **Roughness Wireframe** button to show a subtle inspection mesh (hidden by default).
+
+All treads sample one terrain-wide field. Only the outer terrain border (one grid cell wide) stays flat; internal tread edges follow the roughness. Noise affects local upper surfaces, including the cylinder's circular top, while footprints and bottoms stay fixed. Deep depressions are limited to leave at least `1 mm` of material in thin treads. Settings support undo/redo and XML import/export. Export uses embedded convex mesh sections to preserve rough-surface collisions in MuJoCo without external files. Higher resolution increases XML size and simulation cost.
+
 ## Roadmap
 
-- [ ] Add configurable Perlin noise for terrain surfaces, including amplitude, frequency, and random seed controls, with MJCF export as a loadable height field or mesh.
+- [x] Add configurable Perlin noise for terrain surfaces, including amplitude, frequency, and random seed controls, with MJCF export as loadable meshes.
 - [ ] Deploy on Github Page.

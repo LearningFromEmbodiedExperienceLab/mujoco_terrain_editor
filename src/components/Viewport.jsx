@@ -26,11 +26,16 @@ function Scene({ showOriginAxes }) {
       <color attach="background" args={[palette.background]} />
       <fog attach="fog" args={[palette.background, 19, 42]} />
       <ambientLight intensity={dark ? 0.7 : 1.05} />
-      <hemisphereLight args={[palette.sky, palette.hemiGround, dark ? 0.7 : 1.1]} />
+      <hemisphereLight
+        position={[0, 1, 0]}
+        args={[palette.sky, palette.hemiGround, dark ? 0.7 : 1.1]}
+      />
       <directionalLight
         position={[-7, -9, 14]}
         intensity={dark ? 2.2 : 2.6}
         castShadow
+        shadow-bias={-0.0001}
+        shadow-normalBias={0.015}
         shadow-mapSize={[2048, 2048]}
         shadow-camera-left={-14}
         shadow-camera-right={14}

@@ -56,6 +56,10 @@ function recordSceneChange(state, scenePatch) {
 
 function normalizeParams(preset, params = {}) {
   return Object.fromEntries(preset.parameters.map((parameter) => {
+    if (parameter.type === 'boolean') {
+      const value = params[parameter.key];
+      return [parameter.key, typeof value === 'boolean' ? value : parameter.default];
+    }
     let value = Number(params[parameter.key]);
     if (!Number.isFinite(value)) value = parameter.default;
     if (parameter.integer) value = Math.round(value);
@@ -102,6 +106,7 @@ const useSceneStore = create((set, get) => ({
   isTransforming: false,
   language: 'zh',
   theme: 'light',
+  roughnessWireframe: false,
   historyPast: [],
   historyFuture: [],
   historyTransactionOpen: false,
@@ -321,6 +326,7 @@ const useSceneStore = create((set, get) => ({
     if (language === 'zh' || language === 'en') set({ language });
   },
   toggleTheme: () => set((state) => ({ theme: state.theme === 'light' ? 'dark' : 'light' })),
+  toggleRoughnessWireframe: () => set((state) => ({ roughnessWireframe: !state.roughnessWireframe })),
   beginHistoryTransaction: () => set({
     historyTransactionOpen: true,
     historyTransactionRecorded: false,

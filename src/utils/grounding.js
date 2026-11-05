@@ -26,7 +26,9 @@ function forEachLocalCorner(element, visit) {
     childEuler.set(...(geometry.rotation || [0, 0, 0]));
     childQuaternion.setFromEuler(childEuler);
 
-    const points = geometry.shape === 'cylinder'
+    const points = geometry.shape === 'mesh'
+      ? Array.from({ length: geometry.vertices.length / 3 }, (_, index) => geometry.vertices.slice(index * 3, index * 3 + 3))
+      : geometry.shape === 'cylinder'
       ? [-1, 1].flatMap((zSign) => Array.from({ length: 32 }, (_, index) => {
         const angle = index * Math.PI * 2 / 32;
         return [

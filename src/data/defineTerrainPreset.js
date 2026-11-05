@@ -1,8 +1,11 @@
+import { applySurfaceNoise, NOISE_PARAMETERS } from '../utils/surfaceNoise.js';
+
 /**
  * 定义一个可被组件库、属性面板、场景 store 和 XML 导出器共同使用的地形预设。
  * 参数的 default 是默认物理尺寸的唯一数据源。
  */
 export function defineTerrainPreset(config) {
+  config = { ...config, parameters: [...config.parameters, ...NOISE_PARAMETERS] };
   const requiredFields = [
     'type',
     'label',
@@ -27,8 +30,8 @@ export function defineTerrainPreset(config) {
       throw new Error(`Terrain preset "${config.type}" parameter "${parameter.key}" needs zh and en labels`);
     }
     if (keys.has(parameter.key)) throw new Error(`Terrain preset "${config.type}" has duplicate parameter "${parameter.key}"`);
-    if (!Number.isFinite(parameter.default)) {
-      throw new Error(`Terrain preset "${config.type}" parameter "${parameter.key}" needs a numeric default`);
+    if (parameter.type === 'boolean' ? typeof parameter.default !== 'boolean' : !Number.isFinite(parameter.default)) {
+      throw new Error(`Terrain preset "${config.type}" parameter "${parameter.key}" needs a ${parameter.type === 'boolean' ? 'boolean' : 'numeric'} default`);
     }
     if (parameter.min !== undefined && parameter.default < parameter.min) {
       throw new Error(`Terrain preset "${config.type}" parameter "${parameter.key}" default is below min`);
@@ -49,5 +52,9 @@ export function defineTerrainPreset(config) {
   return {
     ...config,
     defaultParams,
+    toGeometries: (params) => {
+      const values = { ...defaultParams, ...params };
+      return applySurfaceNoise(config.toGeometries(values), values);
+    },
   };
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { getPreset } from '../data/presets.js';
 import { sanitizeXmlName } from './xmlNames.js';
+import { surfaceCollisionGeometries } from './surfaceNoise.js';
 
 const round = (value) => {
   const normalized = Math.abs(value) < 1e-9 ? 0 : value;
@@ -45,10 +46,10 @@ function editorMetadata(element, geomCount) {
   return `    <!-- MTE_DATA ${payload} -->`;
 }
 
-function elementGeoms(element, elementIndex) {
+function elementGeoms(element, elementIndex, assets) {
   const preset = getPreset(element.type);
   if (!preset) return '';
-  const geometries = preset.toGeometries(element.params);
+  const geometries = preset.toGeometries(element.params).flatMap(surfaceCollisionGeometries);
   if (!geometries.length) return '';
   const elementNumber = String(elementIndex + 1).padStart(3, '0');
   const namePrefix = sanitizeXmlName(element.name, `${preset.xmlName}_${elementNumber}`);
@@ -56,6 +57,25 @@ function elementGeoms(element, elementIndex) {
     ...element.rotation.map((degree) => degree * Math.PI / 180),
   ));
   const geoms = geometries.map((geometry, index) => {
+    const name = geometries.length === 1 || index === 0
+      ? namePrefix
+      : `${namePrefix}_step_${String(index + 1).padStart(2, '0')}`;
+    if (geometry.shape === 'mesh') {
+      const meshName = `mte_surface_${elementIndex + 1}_${index + 1}`;
+      const childQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(...(geometry.rotation || [0, 0, 0])));
+      const vertices = [];
+      for (let offset = 0; offset < geometry.vertices.length; offset += 3) {
+        const vertex = new THREE.Vector3(...geometry.vertices.slice(offset, offset + 3))
+          .applyQuaternion(childQuaternion)
+          .add(new THREE.Vector3(...geometry.position))
+          .multiply(new THREE.Vector3(...element.scale))
+          .applyQuaternion(elementQuaternion)
+          .add(new THREE.Vector3(...element.position));
+        vertices.push(...vertex.toArray());
+      }
+      assets.push(`    <mesh ${attrs({ name: meshName, vertex: vector(vertices) })}/>`);
+      return `    <geom ${attrs({ name, type: 'mesh', mesh: meshName, rgba: hexToRgba(element.color), friction: '1 0.005 0.0001', condim: '3' })}/>`;
+    }
     // MuJoCo boxes use half-extents, while cylinders use radius and half-height.
     // With no wrapper body, bake the element transform into every geom.
     const geomType = geometry.shape === 'cylinder' ? 'cylinder' : 'box';
@@ -74,9 +94,7 @@ function elementGeoms(element, elementIndex) {
       || Math.abs(quaternion.z) > 1e-9
       || Math.abs(quaternion.w - 1) > 1e-9;
     return `    <geom ${attrs({
-      name: geometries.length === 1 || index === 0
-        ? namePrefix
-        : `${namePrefix}_step_${String(index + 1).padStart(2, '0')}`,
+      name,
       type: geomType,
       size: vector(size),
       pos: vector(position.toArray()),
@@ -90,11 +108,13 @@ function elementGeoms(element, elementIndex) {
 }
 
 export function exportToXML(elements) {
-  const terrain = elements.map(elementGeoms).filter(Boolean).join('\n');
+  const assets = [];
+  const terrain = elements.map((element, index) => elementGeoms(element, index, assets)).filter(Boolean).join('\n');
+  const assetSection = assets.length ? `\n  <asset>\n${assets.join('\n')}\n  </asset>` : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <mujoco model="terrain">
   <compiler angle="radian" coordinate="local"/>
-  <option timestep="0.002" gravity="0 0 -9.81"/>
+  <option timestep="0.002" gravity="0 0 -9.81"/>${assetSection}
   <worldbody>
     <geom name="ground" type="plane" size="30 30 0.1" friction="1 0.005 0.0001" condim="3"/>
 ${terrain}

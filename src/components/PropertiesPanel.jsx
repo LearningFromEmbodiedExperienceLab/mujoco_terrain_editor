@@ -272,14 +272,25 @@ function PropertiesPanel() {
       </section>
       <section className="app-section">
         <p className="ui-kicker">{t('geometryParameters')}</p>
-        {preset.parameters.map((parameter) => (
-          <ParameterInput
-            key={parameter.key}
-            {...parameter}
-            label={localize(parameter.label, language)}
-            value={element.params[parameter.key]}
-            onChange={(next) => updateParam(parameter.key, next)}
-          />
+        {preset.parameters.filter((parameter) => !parameter.visibleWhen || parameter.visibleWhen(element.params)).map((parameter) => (
+          parameter.type === 'boolean' ? (
+            <label key={parameter.key} className="ui-check app-lock">
+              <input
+                type="checkbox"
+                checked={element.params[parameter.key]}
+                onChange={(event) => updateParam(parameter.key, event.target.checked)}
+              />
+              <span>{localize(parameter.label, language)}</span>
+            </label>
+          ) : (
+            <ParameterInput
+              key={parameter.key}
+              {...parameter}
+              label={localize(parameter.label, language)}
+              value={element.params[parameter.key]}
+              onChange={(next) => updateParam(parameter.key, next)}
+            />
+          )
         ))}
         <div className="app-field">
           <div className="app-label"><span>{t('displayColor')}</span></div>
