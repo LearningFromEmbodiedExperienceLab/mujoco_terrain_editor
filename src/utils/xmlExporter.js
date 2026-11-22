@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { getPreset } from '../data/presets.js';
 import { sanitizeXmlName } from './xmlNames.js';
-import { surfaceCollisionGeometries } from './surfaceNoise.js';
+import { surfaceCollisionGeometries } from './surfaceCollision.js';
+import { hasHeightfieldSurface, rasterizeBoxSurface } from './heightfield.js';
 
 const round = (value) => {
   const normalized = Math.abs(value) < 1e-9 ? 0 : value;
@@ -46,16 +47,34 @@ function editorMetadata(element, geomCount) {
   return `    <!-- MTE_DATA ${payload} -->`;
 }
 
-function elementGeoms(element, elementIndex, assets) {
+function elementGeoms(element, elementIndex, assets, heightfields) {
   const preset = getPreset(element.type);
   if (!preset) return '';
-  const geometries = preset.toGeometries(element.params).flatMap(surfaceCollisionGeometries);
-  if (!geometries.length) return '';
+  const sourceGeometries = preset.toGeometries(element.params);
+  if (!sourceGeometries.length) return '';
   const elementNumber = String(elementIndex + 1).padStart(3, '0');
   const namePrefix = sanitizeXmlName(element.name, `${preset.xmlName}_${elementNumber}`);
   const elementQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(
     ...element.rotation.map((degree) => degree * Math.PI / 180),
   ));
+  if (heightfields && hasHeightfieldSurface(element)) {
+    const field = rasterizeBoxSurface(sourceGeometries);
+    const hfield = `mte_heightfield_${elementIndex + 1}`;
+    const file = `${hfield}.png`;
+    heightfields.push({ ...field, file });
+    const [sx, sy, sz] = element.scale;
+    const size = vector([field.width * sx / 2, field.depth * sy / 2,
+      Math.max(1e-6, field.relief * sz), field.baseDepth * sz]);
+    const position = new THREE.Vector3(0, 0, field.minHeight * sz)
+      .applyQuaternion(elementQuaternion).add(new THREE.Vector3(...element.position));
+    const { w, x, y, z } = elementQuaternion;
+    assets.push(`    <hfield ${attrs({ name: hfield, file, size })}/>`);
+    return `${editorMetadata(element, 1)}\n    <geom ${attrs({
+      name: namePrefix, type: 'hfield', hfield, pos: vector(position.toArray()), quat: vector([w, x, y, z]),
+      rgba: hexToRgba(element.color), friction: '1 0.005 0.0001', condim: '3',
+    })}/>`;
+  }
+  const geometries = sourceGeometries.flatMap(surfaceCollisionGeometries);
   const geoms = geometries.map((geometry, index) => {
     const name = geometries.length === 1 || index === 0
       ? namePrefix
@@ -107,9 +126,9 @@ function elementGeoms(element, elementIndex, assets) {
   return `${editorMetadata(element, geometries.length)}\n${geoms}`;
 }
 
-export function exportToXML(elements) {
+function serializeScene(elements, heightfields) {
   const assets = [];
-  const terrain = elements.map((element, index) => elementGeoms(element, index, assets)).filter(Boolean).join('\n');
+  const terrain = elements.map((element, index) => elementGeoms(element, index, assets, heightfields)).filter(Boolean).join('\n');
   const assetSection = assets.length ? `\n  <asset>\n${assets.join('\n')}\n  </asset>` : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <mujoco model="terrain">
@@ -123,8 +142,17 @@ ${terrain}
 `;
 }
 
-export function downloadXML(elements, filename = 'terrain.xml') {
-  const blob = new Blob([exportToXML(elements)], { type: 'application/xml;charset=utf-8' });
+export function exportToXML(elements) {
+  return serializeScene(elements);
+}
+
+export function exportHeightfieldScene(elements) {
+  const heightfields = [];
+  const xml = serializeScene(elements, heightfields);
+  return { xml, heightfields };
+}
+
+export function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -134,6 +162,10 @@ export function downloadXML(elements, filename = 'terrain.xml') {
   anchor.remove();
   // Revoking on the next task avoids cancelling downloads in stricter browsers.
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+export function downloadXML(elements, filename = 'terrain.xml') {
+  downloadBlob(new Blob([exportToXML(elements)], { type: 'application/xml;charset=utf-8' }), filename);
 }
 
 export function timestampedXMLFilename(date = new Date()) {

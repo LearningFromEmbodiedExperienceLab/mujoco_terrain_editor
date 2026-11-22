@@ -1,7 +1,18 @@
 import { Box, Cylinder, Layers3, Mountain, PanelsTopLeft } from 'lucide-react';
 import { defineTerrainPreset } from './defineTerrainPreset.js';
+import { generateSurfaceBoxes } from '../utils/surfaceBoxes.js';
 
 const RAMP_THICKNESS = 0.08;
+const showRandomBoxParameters = ({ randomBoxes }) => randomBoxes;
+
+function randomBoxRange(suffix, label, defaults, options) {
+  const rangeMax = `randomBoxMax${suffix}`;
+  const shared = { label, unit: 'M', min: 0.01, step: 0.01, ...options };
+  return [
+    { ...shared, key: `randomBoxMin${suffix}`, default: defaults[0], rangeMax, visibleWhen: showRandomBoxParameters },
+    { ...shared, key: rangeMax, default: defaults[1], visibleWhen: () => false },
+  ];
+}
 
 export const PRESETS = [
   defineTerrainPreset({
@@ -13,12 +24,22 @@ export const PRESETS = [
       { key: 'width', label: { zh: '宽度 / X', en: 'Width / X' }, unit: 'M', default: 1, min: 0.01, step: 0.05 },
       { key: 'depth', label: { zh: '长度 / Y', en: 'Length / Y' }, unit: 'M', default: 1, min: 0.01, step: 0.05 },
       { key: 'height', label: { zh: '高度 / Z', en: 'Height / Z' }, unit: 'M', default: 1, min: 0.01, step: 0.05 },
+      { key: 'randomBoxes', label: { zh: '生成随机方块', en: 'Generate Random Boxes' }, type: 'boolean', default: false },
+      { key: 'randomBoxCount', label: { zh: '方块数量', en: 'Box Count' }, unit: '', default: 12, min: 1, max: 200, step: 1, integer: true, visibleWhen: showRandomBoxParameters },
+      ...randomBoxRange('Width', { zh: '方块宽度 / X', en: 'Box Width / X' }, [0.08, 0.18]),
+      ...randomBoxRange('Depth', { zh: '方块长度 / Y', en: 'Box Length / Y' }, [0.08, 0.18]),
+      ...randomBoxRange('Height', { zh: '方块高度 / Z', en: 'Box Height / Z' }, [0.03, 0.12]),
+      ...randomBoxRange('Yaw', { zh: '方块朝向 / Yaw', en: 'Box Yaw / Z' }, [0, 0], { unit: 'DEG', min: -180, max: 180, step: 1 }),
+      { key: 'randomBoxSeed', label: { zh: '方块随机种子', en: 'Box Seed' }, unit: '', default: 1, min: 0, max: 2147483647, step: 1, integer: true, visibleWhen: showRandomBoxParameters },
     ],
     getSummary: ({ width, depth, height }) => `${width} × ${depth} × ${height}`,
     getGroundOffset: ({ height }) => height / 2,
     toGeometries: ({ width, depth, height }) => [
       { args: [width, depth, height], position: [0, 0, 0] },
     ],
+    addSurfaceGeometries: (geometries, params) => (
+      params.randomBoxes ? [...geometries, ...generateSurfaceBoxes(geometries[0], params)] : geometries
+    ),
   }),
   defineTerrainPreset({
     type: 'ramp',

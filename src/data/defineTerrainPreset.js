@@ -54,7 +54,8 @@ export function defineTerrainPreset(config) {
     defaultParams,
     toGeometries: (params) => {
       const values = { ...defaultParams, ...params };
-      return applySurfaceNoise(config.toGeometries(values), values);
+      const geometries = applySurfaceNoise(config.toGeometries(values), values);
+      return config.addSurfaceGeometries?.(geometries, values) ?? geometries;
     },
   };
 }

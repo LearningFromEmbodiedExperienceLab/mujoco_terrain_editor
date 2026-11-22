@@ -1,3 +1,5 @@
+import { createSeededRandom } from './seededRandom.js';
+
 export const NOISE_PARAMETERS = [
   { key: 'perlinNoise', label: { zh: '应用 Perlin 噪声', en: 'Apply Perlin Noise' }, type: 'boolean', default: false },
   { key: 'noiseAmplitude', label: { zh: '噪声高度', en: 'Noise Amplitude' }, unit: 'M', default: 0.02, min: 0, step: 0.005, visibleWhen: ({ perlinNoise }) => perlinNoise },
@@ -19,11 +21,7 @@ export function generateRoughnessHeightField(width, depth, params) {
   const columns = Math.max(2, Math.floor(width / horizontalScale) + 1);
   const rows = Math.max(2, Math.floor(depth / horizontalScale) + 1);
   const values = new Array(columns * rows).fill(0);
-  let state = params.noiseSeed >>> 0;
-  const random = () => {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-    return state / 4294967296;
-  };
+  const random = createSeededRandom(params.noiseSeed);
   const downsampledScale = Math.max(0.5 / params.noiseFrequency, horizontalScale) * 2 ** random();
   let cellSize = 2 * downsampledScale / horizontalScale;
   let amplitude = 1;
@@ -78,34 +76,52 @@ export function sampleHeightField(field, x, y) {
     + at(x0, y1) * (1 - tx) * ty + at(x1, y1) * tx * ty;
 }
 
+export function buildSurfaceMesh(geometry, height, points, topFaces, boundary, reliefAt) {
+  const vertices = [];
+  const minRelief = -height + Math.min(0.001, height / 2);
+  for (const [x, y] of points) {
+    vertices.push(x, y, height / 2 + Math.max(minRelief, reliefAt(x, y)));
+  }
+  for (const [x, y] of points) vertices.push(x, y, -height / 2);
+
+  const topCount = points.length;
+  const indices = [...topFaces];
+  for (let index = 0; index < topFaces.length; index += 3) {
+    indices.push(topFaces[index + 2] + topCount, topFaces[index + 1] + topCount, topFaces[index] + topCount);
+  }
+  for (const [a, b] of boundary) {
+    indices.push(a, a + topCount, b + topCount, a, b + topCount, b);
+  }
+  return { ...geometry, shape: 'mesh', vertices, indices, topFaces, topCount };
+}
+
 function noisyGeometry(geometry, params, field, bounds) {
   const circular = geometry.shape === 'cylinder';
   const [width, depth, height] = circular
     ? [geometry.args[0] * 2, geometry.args[0] * 2, geometry.args[1]]
     : geometry.args;
-  const vertices = [];
+  const points = [];
   const topFaces = [];
   const boundary = [];
-  const addVertex = (x, y) => {
+  let surfaceGrid;
+  const reliefAt = (x, y) => {
     const sampleX = x + geometry.position[0] - bounds.minX;
     const sampleY = y + geometry.position[1] - bounds.minY;
     const border = field.horizontalScale;
     const onBorder = sampleX < border || sampleY < border
       || sampleX > bounds.width - border || sampleY > bounds.depth - border;
-    const relief = onBorder ? 0 : sampleHeightField(field, sampleX, sampleY);
-    // Preserve a solid base even when the requested depression exceeds a thin tread.
-    vertices.push(x, y, height / 2 + Math.max(-height + Math.min(0.001, height / 2), relief));
+    return onBorder ? 0 : sampleHeightField(field, sampleX, sampleY);
   };
 
   if (circular) {
     const rings = Math.max(2, Math.ceil(width / 2 / field.horizontalScale));
     const segments = Math.max(48, params.noiseResolution * 4);
-    addVertex(0, 0);
+    points.push([0, 0]);
     for (let ring = 1; ring <= rings; ring += 1) {
       const radius = width / 2 * ring / rings;
       for (let segment = 0; segment < segments; segment += 1) {
         const angle = segment / segments * Math.PI * 2;
-        addVertex(Math.cos(angle) * radius, Math.sin(angle) * radius);
+        points.push([Math.cos(angle) * radius, Math.sin(angle) * radius]);
         const current = 1 + (ring - 1) * segments + segment;
         const next = 1 + (ring - 1) * segments + (segment + 1) % segments;
         if (ring === 1) topFaces.push(0, current, next);
@@ -120,9 +136,10 @@ function noisyGeometry(geometry, params, field, bounds) {
   } else {
     const columns = Math.max(2, Math.ceil(width / field.horizontalScale));
     const rows = Math.max(2, Math.ceil(depth / field.horizontalScale));
+    surfaceGrid = { columns, rows, field };
     for (let row = 0; row <= rows; row += 1) {
       for (let column = 0; column <= columns; column += 1) {
-        addVertex(width * (column / columns - 0.5), depth * (row / rows - 0.5));
+        points.push([width * (column / columns - 0.5), depth * (row / rows - 0.5)]);
         const current = row * (columns + 1) + column;
         if (row < rows && column < columns) {
           const above = current + columns + 1;
@@ -136,18 +153,7 @@ function noisyGeometry(geometry, params, field, bounds) {
     }
   }
 
-  const topCount = vertices.length / 3;
-  for (let index = 0; index < topCount; index += 1) {
-    vertices.push(vertices[index * 3], vertices[index * 3 + 1], -height / 2);
-  }
-  const indices = [...topFaces];
-  for (let index = 0; index < topFaces.length; index += 3) {
-    indices.push(topFaces[index + 2] + topCount, topFaces[index + 1] + topCount, topFaces[index] + topCount);
-  }
-  for (const [a, b] of boundary) {
-    indices.push(a, a + topCount, b + topCount, a, b + topCount, b);
-  }
-  return { ...geometry, shape: 'mesh', vertices, indices, topFaces, topCount };
+  return buildSurfaceMesh({ ...geometry, surfaceGrid }, height, points, topFaces, boundary, reliefAt);
 }
 
 export function applySurfaceNoise(geometries, params) {
@@ -163,18 +169,4 @@ export function applySurfaceNoise(geometries, params) {
   const depth = Math.max(...extents.map((extent) => extent.y + extent.depth / 2)) - minY;
   const field = generateRoughnessHeightField(width, depth, params);
   return geometries.map((geometry) => noisyGeometry(geometry, params, field, { minX, minY, width, depth }));
-}
-
-// Each triangular column is convex, so MuJoCo preserves all surface relief
-// during collision detection instead of replacing the whole terrain by its hull.
-export function surfaceCollisionGeometries(geometry) {
-  if (geometry.shape !== 'mesh') return [geometry];
-  const columns = [];
-  for (let index = 0; index < geometry.topFaces.length; index += 3) {
-    const top = geometry.topFaces.slice(index, index + 3);
-    const vertices = [...top, ...top.map((vertex) => vertex + geometry.topCount)]
-      .flatMap((vertex) => geometry.vertices.slice(vertex * 3, vertex * 3 + 3));
-    columns.push({ shape: 'mesh', vertices, position: geometry.position, rotation: geometry.rotation });
-  }
-  return columns;
 }

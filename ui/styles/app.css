@@ -488,6 +488,13 @@ body,
 
 .app-axis .app-input { padding-left: 20px; }
 
+.app-range .app-axis .app-input { padding-left: 36px; }
+
+.app-regenerate-boxes {
+  height: 32px;
+  padding-block: 0;
+}
+
 .app-type {
   display: flex;
   align-items: center;

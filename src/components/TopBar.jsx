@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, Copy, Download, Move3D, Redo2, Rotate3D, Save, Trash2, Undo2, Upload, Waypoints } from 'lucide-react';
+import { CheckCircle2, Copy, Download, ImageDown, Move3D, Redo2, Rotate3D, Save, Trash2, Undo2, Upload, Waypoints } from 'lucide-react';
 import useSceneStore from '../store/useSceneStore';
 import { downloadXML, saveXMLToHandle, timestampedXMLFilename } from '../utils/xmlExporter';
+import { hasHeightfieldSurface } from '../utils/heightfield';
+import { downloadHeightfieldArchive } from '../utils/heightfieldArchive';
 import { translate } from '../i18n';
 import useXmlLoader from '../hooks/useXmlLoader';
 
@@ -23,6 +25,7 @@ function TopBar() {
   const fileInputRef = useRef(null);
   const saveToastTimerRef = useRef(null);
   const [saveToast, setSaveToast] = useState('');
+  const [exportingHeightfield, setExportingHeightfield] = useState(false);
   const elements = useSceneStore((state) => state.elements);
   const selectedId = useSceneStore((state) => state.selectedId);
   const selectedCount = useSceneStore((state) => state.selectedIds.length);
@@ -93,6 +96,19 @@ function TopBar() {
   const handleExport = () => {
     downloadXML(elements, timestampedXMLFilename());
     markSceneSaved();
+  };
+
+  const handleHeightfieldExport = async () => {
+    setExportingHeightfield(true);
+    try {
+      const filename = timestampedXMLFilename().replace(/\.xml$/, 'heightfield.zip');
+      await downloadHeightfieldArchive(elements, filename);
+      if (useSceneStore.getState().elements === elements) markSceneSaved();
+    } catch (error) {
+      window.alert(`${t('heightfieldExportError')}\n${error.message}`);
+    } finally {
+      setExportingHeightfield(false);
+    }
   };
 
   const handleSave = async () => {
@@ -208,6 +224,17 @@ function TopBar() {
               <span className="app-label-text">{t('saveXml')}</span>
             </button>
           )}
+          <button
+            type="button"
+            className="ui-button ui-button--secondary"
+            disabled={exportingHeightfield || !elements.some(hasHeightfieldSurface)}
+            onClick={handleHeightfieldExport}
+            title={t('heightfieldExportTitle')}
+            aria-label={t('heightfieldExport')}
+          >
+            <ImageDown size={15} strokeWidth={1.75} />
+            <span className="app-label-text">{t('heightfieldExport')}</span>
+          </button>
           <button type="button" className="ui-button" onClick={handleExport} title={t('exportTitle')}>
             <Download size={15} strokeWidth={1.75} />
             <span className="app-label-text">{t('exportXml')}</span>

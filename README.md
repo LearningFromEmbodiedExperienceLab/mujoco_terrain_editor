@@ -93,6 +93,14 @@ Default dimensions and terrain definitions are centralized in [`src/data/presets
 
 Editor-wide snapping increments and gizmo sizes are defined in [`src/editorConfig.js`](src/editorConfig.js).
 
+### Random Boxes
+
+Select a Box and enable **Generate Random Boxes** under Geometry Parameters. Set the count (`1–200`) and the min/max ranges for width, length, and height in meters and yaw about the local Z axis in degrees (`−180° to 180°`, default `0°`). Centers are sampled across the full base. Footprints are clipped at its edges and corners after rotation, and boxes may overlap. Click **Regenerate** for a new seed or enter a **Box Seed** to reproduce a layout.
+
+The boxes move and rotate with the base. With **Apply Perlin Noise** enabled, each box rests at the base height under its center and its top samples the same noise field, including rotated and clipped tops. MJCF exports include the rough surfaces as collision meshes and preserve the settings when reopened in the editor.
+
+**Export Heightfield** downloads a ZIP with `terrain.xml` and one grayscale PNG per Box that uses random boxes or Perlin noise. Extract the files together and open `terrain.xml` in MuJoCo. The heightfield samples the highest surface on a grid with 256 intervals along the longest edge and stores 256 height levels. This approximates vertical steps and clipped edges. Use **Export XML** to preserve their geometry in convex collision meshes. Other terrain elements retain their standard export format.
+
 ### Perlin Surface Roughness
 
 Every terrain type has an **Apply Perlin Noise** checkbox. Enabling it reveals:
@@ -107,7 +115,7 @@ Roughness follows LocoLab's shared sampler: two gradient-Perlin octaves with wei
 
 Noisy upper surfaces use matte shading, crisp borders, and a subtle height-based tint to keep shallow relief readable without changing the geometry or exported colors. Use the toolbar's **Roughness Wireframe** button to show a subtle inspection mesh (hidden by default).
 
-All treads sample one terrain-wide field. Only the outer terrain border (one grid cell wide) stays flat; internal tread edges follow the roughness. Noise affects local upper surfaces, including the cylinder's circular top, while footprints and bottoms stay fixed. Deep depressions are limited to leave at least `1 mm` of material in thin treads. Settings support undo/redo and XML import/export. Export uses embedded convex mesh sections to preserve rough-surface collisions in MuJoCo without external files. Higher resolution increases XML size and simulation cost.
+All treads sample one terrain-wide field. Only the outer terrain border (one grid cell wide) stays flat; internal tread edges follow the roughness. Noise affects local upper surfaces, including the cylinder's circular top, while footprints and bottoms stay fixed. Deep depressions are limited to leave at least `1 mm` of material in thin treads. Settings support undo/redo and XML import/export. Export merges adjacent collision sections when their union is convex. The resulting meshes are embedded in the MJCF and preserve the surface relief. Higher resolution increases XML size and simulation cost.
 
 ## Roadmap
 

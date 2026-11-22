@@ -69,18 +69,18 @@ const TerrainElement = forwardRef(function TerrainElement({ element, selected = 
           )}
           <meshStandardMaterial
             color={element.color}
-            vertexColors={geometry.shape === 'mesh'}
+            vertexColors={Boolean(geometry.topFaces)}
             roughness={0.88}
             metalness={0}
-            polygonOffset={geometry.shape === 'mesh'}
+            polygonOffset={Boolean(geometry.topFaces)}
             polygonOffsetFactor={1}
             polygonOffsetUnits={1}
           />
-          {geometry.shape === 'mesh' && roughnessWireframe && (
+          {geometry.topFaces && roughnessWireframe && (
             <SurfaceWireframe geometry={geometry} color={wireframeColor} opacity={selected ? 0.28 : 0.16} />
           )}
           <Edges
-            threshold={geometry.shape === 'mesh' ? 60 : 15}
+            threshold={geometry.topFaces ? 60 : 15}
             color={selected ? palette.edgeSelected : palette.edge}
             opacity={selected ? 1 : 0.55}
             transparent

@@ -4,7 +4,7 @@ export function createSurfaceGeometry(geometry) {
   const vertices = [...geometry.vertices];
   const indices = [...geometry.indices];
   // Keep smooth relief normals separate from the hard walls and underside.
-  for (let index = geometry.topFaces.length * 2; index < indices.length; index += 1) {
+  for (let index = (geometry.topFaces?.length ?? 0) * 2; index < indices.length; index += 1) {
     const source = indices[index] * 3;
     indices[index] = vertices.length / 3;
     vertices.push(...geometry.vertices.slice(source, source + 3));
@@ -13,6 +13,7 @@ export function createSurfaceGeometry(geometry) {
   result.setAttribute('position', new Float32BufferAttribute(vertices, 3));
   result.setIndex(indices);
   result.computeVertexNormals();
+  if (!geometry.topFaces) return result;
   const baseHeight = geometry.args.at(-1) / 2;
   let relief = 0;
   for (let index = 0; index < geometry.topCount; index += 1) {

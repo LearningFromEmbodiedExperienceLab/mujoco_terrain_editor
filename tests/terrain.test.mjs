@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
+import { Mesh, Raycaster, Vector3 } from 'three';
+import { ConvexHull } from 'three/addons/math/ConvexHull.js';
 import { PRESETS, getPreset } from '../src/data/presets.js';
 import useSceneStore from '../src/store/useSceneStore.js';
 import { getGroundOffset, getWorldBounds } from '../src/utils/grounding.js';
-import { applySurfaceNoise, generateRoughnessHeightField, sampleHeightField, surfaceCollisionGeometries } from '../src/utils/surfaceNoise.js';
-import { exportToXML } from '../src/utils/xmlExporter.js';
+import { applySurfaceNoise, generateRoughnessHeightField, sampleHeightField } from '../src/utils/surfaceNoise.js';
+import { surfaceCollisionGeometries } from '../src/utils/surfaceCollision.js';
+import { rasterizeBoxSurface } from '../src/utils/heightfield.js';
+import { exportHeightfieldScene, exportToXML } from '../src/utils/xmlExporter.js';
 import { createSurfaceGeometry } from '../src/utils/surfaceGeometry.js';
 
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} != ${expected}`);
@@ -13,6 +17,195 @@ const makeElement = (preset, params = {}) => ({
   type: preset.type, name: preset.xmlName, position: [0, 0, 0], rotation: [0, 0, 0],
   scale: [1, 1, 1], color: '#c8d3cb', groundLocked: true,
   params: { ...preset.defaultParams, ...params },
+});
+
+function checkCollisionVolume(geometry, pieces) {
+  const { vertices, topFaces, topCount } = geometry;
+  const bottom = vertices[topCount * 3 + 2];
+  let volume = 0;
+  for (let i = 0; i < topFaces.length; i += 3) {
+    const [[ax, ay, az], [bx, by, bz], [cx, cy, cz]] = topFaces.slice(i, i + 3)
+      .map((vertex) => vertices.slice(vertex * 3, vertex * 3 + 3));
+    const area = ((bx - ax) * (cy - ay) - (by - ay) * (cx - ax)) / 2;
+    assert.ok(area > 0);
+    volume += area * ((az + bz + cz) / 3 - bottom);
+  }
+  const collisionVolume = pieces.reduce((sum, piece) => {
+    const points = Array.from({ length: piece.vertices.length / 3 }, (_, index) => (
+      new Vector3().fromArray(piece.vertices, index * 3)
+    ));
+    const hull = new ConvexHull().setFromPoints(points);
+    return hull.faces.reduce((total, face) => total + face.area * face.constant / 3, sum);
+  }, 0);
+  close(collisionVolume, volume);
+}
+
+test('random boxes are reproducible and clip at base edges and corners', () => {
+  const preset = getPreset('box');
+  assert.equal(preset.toGeometries({}).length, 1);
+  const params = {
+    width: 0.5, depth: 0.4, height: 0.2, randomBoxes: true, randomBoxCount: 40,
+    randomBoxMinWidth: 0.2, randomBoxMaxWidth: 0.1,
+    randomBoxMinDepth: 0.12, randomBoxMaxDepth: 0.15,
+    randomBoxMinHeight: 0.07, randomBoxMaxHeight: 0.11,
+  };
+  const geometries = preset.toGeometries(params);
+  assert.deepEqual(geometries, preset.toGeometries(params));
+  assert.notDeepEqual(geometries, preset.toGeometries({ ...params, randomBoxSeed: 42 }));
+  const boxes = geometries.slice(1);
+  assert.equal(boxes.length, params.randomBoxCount);
+  let clipsCorner = false;
+  assert.ok(boxes.some(({ args }) => args));
+  for (const { args, vertices, position: [x, y, z] } of boxes) {
+    const height = args ? args[2] : vertices[2] * 2;
+    assert.ok(height >= 0.07 && height <= 0.11);
+    close(z - height / 2, params.height / 2);
+    if (args) {
+      assert.ok(args[0] >= 0.1 && args[0] <= 0.2);
+      assert.ok(args[1] >= 0.12 && args[1] <= 0.15);
+      assert.ok(Math.abs(x) + args[0] / 2 <= params.width / 2 + 1e-9);
+      assert.ok(Math.abs(y) + args[1] / 2 <= params.depth / 2 + 1e-9);
+    } else {
+      assert.equal(vertices.length, 24);
+      for (let i = 0; i < vertices.length; i += 3) {
+        const px = Math.abs(x + vertices[i]);
+        const py = Math.abs(y + vertices[i + 1]);
+        assert.ok(px <= params.width / 2 + 1e-9 && py <= params.depth / 2 + 1e-9);
+        if (Math.abs(px - params.width / 2) < 1e-9 && Math.abs(py - params.depth / 2) < 1e-9) {
+          clipsCorner = true;
+        }
+      }
+    }
+  }
+  assert.ok(clipsCorner);
+});
+
+test('yaw rotates boxes before clipping and preserves their convex footprints', () => {
+  const preset = getPreset('box');
+  const params = {
+    randomBoxes: true, randomBoxCount: 50, randomBoxMinYaw: -40, randomBoxMaxYaw: -20,
+    randomBoxMinWidth: 0.3, randomBoxMaxWidth: 0.3,
+    randomBoxMinDepth: 0.2, randomBoxMaxDepth: 0.2,
+  };
+  const boxes = preset.toGeometries(params).slice(1);
+  const sampledAngles = new Set();
+  let clipped = false;
+  for (const box of boxes) {
+    assert.deepEqual(surfaceCollisionGeometries(box), [box]);
+    const count = box.vertices.length / 6;
+    const [x, y] = box.position;
+    let area = 0;
+    for (let i = 0; i < count; i += 1) {
+      const [ax, ay] = box.vertices.slice(i * 3, i * 3 + 2);
+      const [bx, by] = box.vertices.slice(((i + 1) % count) * 3);
+      assert.ok(Math.abs(ax + x) <= 0.5 + 1e-9 && Math.abs(ay + y) <= 0.5 + 1e-9);
+      area += (ax * by - ay * bx) / 2;
+      if (Math.abs(bx - ax) > 1e-9 && Math.abs(by - ay) > 1e-9) {
+        const degrees = Math.atan2(by - ay, bx - ax) * 180 / Math.PI;
+        const yaw = ((degrees % 90) + 180) % 90 - 90;
+        assert.ok(yaw >= -40 - 1e-9 && yaw <= -20 + 1e-9);
+        sampledAngles.add(yaw.toFixed(3));
+      }
+    }
+    assert.ok(area > 0 && area <= 0.06 + 1e-9);
+    if (area < 0.06 - 1e-9) clipped = true;
+  }
+  assert.ok(clipped && sampledAngles.size > 1);
+});
+
+test('Perlin roughens uncut and clipped box tops with compact collision meshes', () => {
+  const preset = getPreset('box');
+  for (const yaw of [0, 35]) {
+    const element = makeElement(preset, {
+      width: 1, depth: 0.8, height: 0.4, randomBoxes: true, randomBoxCount: 24,
+      randomBoxMinWidth: 0.19, randomBoxMaxWidth: 0.32,
+      randomBoxMinDepth: 0.13, randomBoxMaxDepth: 0.28,
+      randomBoxMinYaw: yaw, randomBoxMaxYaw: yaw,
+      perlinNoise: true, noiseAmplitude: 0.3, noiseResolution: 8,
+    });
+    const [base, ...boxes] = preset.toGeometries(element.params);
+    const [, ...flatBoxes] = preset.toGeometries({ ...element.params, perlinNoise: false });
+    assert.deepEqual(base, preset.toGeometries({ ...element.params, randomBoxes: false })[0]);
+    assert.equal(boxes.length, element.params.randomBoxCount);
+    const surface = new Mesh(createSurfaceGeometry(base));
+    const ray = new Raycaster(new Vector3(), new Vector3(0, 0, -1));
+    let roughUncut = false;
+    let roughClipped = false;
+    boxes.forEach(({ args: [width, depth, height], vertices, topCount, topFaces, position: [x, y, z] }, index) => {
+      assert.deepEqual([x, y], flatBoxes[index].position.slice(0, 2));
+      ray.ray.origin.set(x, y, 1);
+      const [hit] = ray.intersectObject(surface);
+      close(z - height / 2, hit.point.z);
+
+      const top = [];
+      for (let i = 0; i < topCount; i += 1) {
+        const [px, py, pz] = vertices.slice(i * 3, i * 3 + 3);
+        const bottom = vertices.slice((topCount + i) * 3, (topCount + i) * 3 + 3);
+        assert.ok(Math.abs(x + px) <= 0.5 + 1e-9 && Math.abs(y + py) <= 0.4 + 1e-9);
+        assert.ok(pz - bottom[2] >= 0.001 - 1e-9);
+        assert.deepEqual(bottom, [px, py, -height / 2]);
+        top.push(pz);
+      }
+      let area = 0;
+      for (let i = 0; i < topFaces.length; i += 3) {
+        const [[ax, ay], [bx, by], [cx, cy]] = topFaces.slice(i, i + 3)
+          .map((vertex) => vertices.slice(vertex * 3, vertex * 3 + 2));
+        area += ((bx - ax) * (cy - ay) - (by - ay) * (cx - ax)) / 2;
+      }
+      assert.ok(area > 0 && area <= width * depth + 1e-9);
+      if (Math.max(...top) - Math.min(...top) > 1e-6) {
+        if (area < width * depth - 1e-9) roughClipped = true;
+        else roughUncut = true;
+      }
+    });
+    surface.geometry.dispose();
+    surface.material.dispose();
+    assert.ok(roughUncut);
+    assert.ok(roughClipped);
+
+    const xml = exportToXML([element]);
+    const metadata = JSON.parse(decodeURIComponent(xml.match(/MTE_DATA (.*?) -->/)[1]));
+    assert.equal((xml.match(/type="mesh"/g) || []).length, metadata.geomCount);
+    let pieceCount = 0;
+    for (const geometry of [base, ...boxes]) {
+      const pieces = surfaceCollisionGeometries(geometry);
+      checkCollisionVolume(geometry, pieces);
+      pieceCount += pieces.length;
+    }
+    assert.equal(metadata.geomCount, pieceCount);
+    assert.ok(pieceCount < [base, ...boxes].reduce((sum, geometry) => sum + geometry.topFaces.length / 3, 0));
+    assert.deepEqual(metadata.element.params, element.params);
+  }
+});
+
+test('Box heightfields record the highest surfaces with +Y at the top of the PNG', () => {
+  const field = rasterizeBoxSurface([
+    { args: [1, 0.5, 0.2], position: [0, 0, 0] },
+    { args: [0.25, 0.125, 0.2], position: [-0.25, 0.125, 0.2] },
+    { args: [0.125, 0.0625, 0.3], position: [-0.25, 0.125, 0.25] },
+  ]);
+  assert.equal(field.columns, 257);
+  assert.equal(field.rows, 129);
+  close(field.minHeight, 0.1);
+  close(field.baseDepth, 0.2);
+  close(field.relief, 0.3);
+  assert.equal(field.pixels[32 * field.columns + 64], 255);
+  assert.equal(field.pixels[96 * field.columns + 64], 0);
+
+  const box = makeElement(getPreset('box'), {
+    randomBoxes: true, randomBoxMinYaw: 30, randomBoxMaxYaw: 70,
+    perlinNoise: true, noiseAmplitude: 0.08,
+  });
+  const ramp = makeElement(getPreset('ramp'));
+  const { xml, heightfields } = exportHeightfieldScene([box, ramp]);
+  assert.equal(heightfields.length, 1);
+  assert.ok(new Set(heightfields[0].pixels).size > 20);
+  assert.match(xml, /<hfield name="mte_heightfield_1" file="mte_heightfield_1.png"/);
+  assert.match(xml, /type="hfield" hfield="mte_heightfield_1"/);
+  assert.match(xml, /name="Ramp" type="box"/);
+  const metadata = JSON.parse(decodeURIComponent(xml.match(/MTE_DATA (.*?) -->/)[1]));
+  assert.deepEqual(metadata.element.params, box.params);
+  assert.equal(metadata.geomCount, 1);
 });
 
 test('rough surface borders shade independently of vertical walls without changing triangles', () => {
@@ -127,13 +320,7 @@ for (const preset of PRESETS) {
         });
       }
       for (const edge of edges.values()) assert.deepEqual(edge, { count: 2, direction: 0 });
-      const columns = surfaceCollisionGeometries(geometry);
-      assert.equal(columns.length, geometry.topFaces.length / 3);
-      columns.forEach((column) => {
-        assert.equal(column.vertices.length, 18);
-        const [ax, ay, , bx, by, , cx, cy] = column.vertices;
-        assert.ok((bx - ax) * (cy - ay) - (by - ay) * (cx - ax) > 0);
-      });
+      checkCollisionVolume(geometry, surfaceCollisionGeometries(geometry));
     });
     assert.ok(raised);
     assert.ok(depressed);

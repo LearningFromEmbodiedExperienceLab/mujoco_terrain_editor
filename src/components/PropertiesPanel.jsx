@@ -15,7 +15,7 @@ function formatNumber(value) {
   return Number(value.toFixed(6)).toString();
 }
 
-function NumericInput({ value, onChange, step = 0.1, min, max, integer = false, axis, disabled = false }) {
+function NumericInput({ value, onChange, step = 0.1, min, max, integer = false, axis, ariaLabel = axis, disabled = false }) {
   // Keep a textual draft separate from the numeric store value so users can
   // temporarily type incomplete values such as "-" or "0." without resets.
   const [draft, setDraft] = useState(() => formatNumber(value));
@@ -92,7 +92,7 @@ function NumericInput({ value, onChange, step = 0.1, min, max, integer = false, 
         onChange={handleChange}
         onKeyDown={handleKeyDown}
         onWheel={(event) => event.currentTarget.blur()}
-        aria-label={axis}
+        aria-label={ariaLabel}
       />
     </label>
   );
@@ -123,18 +123,30 @@ function VectorInput({ label, hint, value, onChange, step = 0.1, min, disabledIn
   );
 }
 
-function ParameterInput({ label, unit = 'M', value, onChange, min = 0.01, max, step = 0.1, integer = false }) {
+function ParameterInput({ label, unit = 'M', value, onChange, min = 0.01, max, step = 0.1, integer = false, range, action }) {
+  const inputProps = { step, min, max, integer };
   return (
     <div className="app-field">
       <div className="app-label"><span>{label}</span>{unit && <code>{unit}</code>}</div>
-      <NumericInput
-        value={value}
-        step={step}
-        min={min}
-        max={max}
-        integer={integer}
-        onChange={onChange}
-      />
+      <div className={range ? 'app-split app-range' : (action ? 'app-split' : undefined)}>
+        <NumericInput
+          {...inputProps}
+          value={value}
+          onChange={onChange}
+          axis={range?.minLabel}
+          ariaLabel={range ? `${label} ${range.minLabel}` : label}
+        />
+        {range && (
+          <NumericInput
+            {...inputProps}
+            value={range.value}
+            onChange={range.onChange}
+            axis={range.maxLabel}
+            ariaLabel={`${label} ${range.maxLabel}`}
+          />
+        )}
+        {action}
+      </div>
     </div>
   );
 }
@@ -289,6 +301,24 @@ function PropertiesPanel() {
               label={localize(parameter.label, language)}
               value={element.params[parameter.key]}
               onChange={(next) => updateParam(parameter.key, next)}
+              range={parameter.rangeMax && {
+                minLabel: t('rangeMin'),
+                maxLabel: t('rangeMax'),
+                value: element.params[parameter.rangeMax],
+                onChange: (next) => updateParam(parameter.rangeMax, next),
+              }}
+              action={parameter.key === 'randomBoxSeed' && (
+                <button
+                  type="button"
+                  className="ui-button ui-button--secondary app-regenerate-boxes"
+                  onClick={() => {
+                    const seed = Math.floor(Math.random() * parameter.max);
+                    updateParam(parameter.key, seed >= element.params[parameter.key] ? seed + 1 : seed);
+                  }}
+                >
+                  <Dices size={14} /> {t('regenerateBoxes')}
+                </button>
+              )}
             />
           )
         ))}
